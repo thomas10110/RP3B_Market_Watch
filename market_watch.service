@@ -7,6 +7,7 @@ After=network.target
 User=mainadmin
 # Replace with the actual path to your project directory
 WorkingDirectory=/home/mainadmin/main/RP3B_Market_Watch
+EnvironmentFile=/home/mainadmin/main/RP3B_Market_Watch/.env
 # Path to Gunicorn and the command to run the app
 # You may need to adjust the path to gunicorn if it's not in /home/mainadmin/.local/bin
 ExecStart=/home/mainadmin/.local/bin/gunicorn --workers 3 --bind unix:market_watch.sock -m 007 wsgi:app
