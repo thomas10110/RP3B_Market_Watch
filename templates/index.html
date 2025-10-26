@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>RP3B Market Watch</title>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 </head>
 <body>
@@ -78,6 +79,21 @@
         </div>
     </div>
 
+    <!-- Chart Modal -->
+    <div id="chart-modal" class="modal">
+        <div class="modal-content chart-modal-content">
+            <header class="modal-header">
+                <h2 id="chart-modal-title">Historical Data</h2>
+                <span class="close-btn chart-close-btn">&times;</span>
+            </header>
+            <div class="modal-body">
+                <canvas id="price-chart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     <script src="{{ url_for('static', filename='scripts.js') }}"></script>
+    <div id="toast-container"></div>
 </body>
 </html>

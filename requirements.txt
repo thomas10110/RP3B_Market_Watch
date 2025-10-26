@@ -1,4 +1,6 @@
 Flask
+Flask-SocketIO
+gunicorn
 requests
 apscheduler
 finnhub-python

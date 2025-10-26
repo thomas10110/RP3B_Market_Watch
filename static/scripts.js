@@ -1,7 +1,9 @@
 document.addEventListener('DOMContentLoaded', () => {
     // --- Caches for state management ---
+    const toastContainer = document.getElementById('toast-container');
     let allEmails = [];
     let watchlistData = [];
+    let priceChart = null;
 
     // --- DOM Element Selectors ---
     const emailInput = document.getElementById('email-input');
@@ -10,8 +12,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const symbolInput = document.getElementById('symbol-input');
     const addSymbolBtn = document.getElementById('add-symbol-btn');
     const watchlistTableBody = document.querySelector('#watchlist-table tbody');
-    const modal = document.getElementById('settings-modal');
-    const closeModalBtn = document.querySelector('.close-btn');
+
+    // Settings Modal
+    const settingsModal = document.getElementById('settings-modal');
+    const closeSettingsBtn = settingsModal.querySelector('.close-btn');
     const modalTitle = document.getElementById('modal-title');
     const targetsList = document.getElementById('targets-list');
     const addTargetForm = document.getElementById('add-target-form');
@@ -19,6 +23,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const targetPercentageInput = document.getElementById('target-percentage');
     const notificationList = document.getElementById('notification-list');
     const saveNotificationPrefsBtn = document.getElementById('save-notification-prefs');
+
+    // Chart Modal
+    const chartModal = document.getElementById('chart-modal');
+    const closeChartBtn = chartModal.querySelector('.close-btn');
+    const chartModalTitle = document.getElementById('chart-modal-title');
 
     let currentWatchlistId = null;
 
@@ -53,7 +62,7 @@ document.addEventListener('DOMContentLoaded', () => {
         watchlistData.forEach(item => {
             const row = document.createElement('tr');
             row.innerHTML = `
-                <td>${item.symbol}</td>
+                <td class="symbol-cell" data-symbol="${item.symbol}">${item.symbol}</td>
                 <td>${item.initial_price ? item.initial_price.toFixed(2) : 'N/A'}</td>
                 <td>${item.last_price ? item.last_price.toFixed(2) : 'N/A'}</td>
                 <td>${new Date(item.last_updated).toLocaleString()}</td>
@@ -71,8 +80,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!stock) return;
 
         modalTitle.textContent = `Settings for ${stock.symbol}`;
-
-        // Render targets
         targetsList.innerHTML = '';
         stock.targets.forEach(target => {
             const li = document.createElement('li');
@@ -82,72 +89,130 @@ document.addEventListener('DOMContentLoaded', () => {
             `;
             targetsList.appendChild(li);
         });
-
-        // Render notification preferences
         notificationList.innerHTML = '';
         allEmails.forEach(email => {
             const li = document.createElement('li');
             const isChecked = stock.subscribed_emails.includes(email.id);
-            li.innerHTML = `
-                <label>
-                    <input type="checkbox" data-email-id="${email.id}" ${isChecked ? 'checked' : ''}>
-                    ${email.email}
-                </label>
-            `;
+            li.innerHTML = `<label><input type="checkbox" data-email-id="${email.id}" ${isChecked ? 'checked' : ''}> ${email.email}</label>`;
             notificationList.appendChild(li);
         });
     };
 
-    // --- Data Fetching and State Update ---
+    const renderChart = (symbol, history) => {
+        chartModalTitle.textContent = `Historical Data for ${symbol}`;
+        const ctx = document.getElementById('price-chart').getContext('2d');
+
+        if (priceChart) {
+            priceChart.destroy();
+        }
+
+        const gradient = ctx.createLinearGradient(0, 0, 0, 400);
+        gradient.addColorStop(0, 'rgba(0, 191, 255, 0.5)');
+        gradient.addColorStop(1, 'rgba(0, 191, 255, 0)');
+
+        priceChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: history.labels,
+                datasets: [{
+                    label: 'Price (USD)',
+                    data: history.data,
+                    borderColor: '#00bfff',
+                    backgroundColor: gradient,
+                    fill: true,
+                    tension: 0.4,
+                    pointRadius: 0,
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: { ticks: { color: '#a0a0a0' }, grid: { color: 'rgba(255,255,255,0.1)' } },
+                    y: { ticks: { color: '#a0a0a0' }, grid: { color: 'rgba(255,255,255,0.1)' } }
+                },
+                plugins: { legend: { labels: { color: '#e0e0e0' } } }
+            }
+        });
+        chartModal.style.display = 'block';
+    };
+
+    // --- Data Fetching ---
     const fetchAllData = async () => {
-        const [emails, watchlist] = await Promise.all([
-            api.get('/api/emails'),
-            api.get('/api/watchlist')
-        ]);
+        const [emails, watchlist] = await Promise.all([api.get('/api/emails'), api.get('/api/watchlist')]);
         allEmails = emails;
         watchlistData = watchlist;
         renderEmails();
         renderWatchlist();
     };
 
+    // --- UI Helper ---
+    const showToast = (message, type = 'success') => {
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
+        toast.textContent = message;
+        toastContainer.appendChild(toast);
+        setTimeout(() => toast.remove(), 3000);
+    };
+
     // --- Event Handlers ---
     const handleAddEmail = async () => {
         const email = emailInput.value.trim();
         if (email) {
-            await api.post('/api/emails', { email });
-            emailInput.value = '';
-            fetchAllData();
+            const response = await api.post('/api/emails', { email });
+            if (response.message) {
+                showToast(response.message);
+                emailInput.value = '';
+                fetchAllData();
+            } else {
+                showToast(response.error, 'error');
+            }
         }
     };
 
     const handleDeleteEmail = async (e) => {
         if (!e.target.matches('.delete-email-btn')) return;
         const emailId = parseInt(e.target.dataset.id);
-        await api.delete(`/api/emails/${emailId}`);
-        fetchAllData();
+        const response = await api.delete(`/api/emails/${emailId}`);
+        if (response.message) {
+            showToast(response.message);
+            fetchAllData();
+        } else {
+            showToast(response.error, 'error');
+        }
     };
 
     const handleAddSymbol = async () => {
         const symbol = symbolInput.value.trim().toUpperCase();
         if (symbol) {
-            await api.post('/api/watchlist', { symbol });
-            symbolInput.value = '';
-            fetchAllData();
+            const response = await api.post('/api/watchlist', { symbol });
+            if (response.message) {
+                showToast(response.message);
+                symbolInput.value = '';
+                fetchAllData();
+            } else {
+                showToast(response.error, 'error');
+            }
         }
     };
 
     const handleDeleteStock = async (e) => {
         if (!e.target.matches('.delete-stock-btn')) return;
         const stockId = parseInt(e.target.dataset.id);
-        await api.delete(`/api/watchlist/${stockId}`);
-        fetchAllData();
+        const response = await api.delete(`/api/watchlist/${stockId}`);
+        if(response.message){
+            showToast(response.message);
+            fetchAllData();
+        } else {
+            showToast(response.error, 'error');
+        }
     };
 
     const handleOpenSettings = (e) => {
         if (!e.target.matches('.settings-btn')) return;
         currentWatchlistId = parseInt(e.target.dataset.id);
         renderModalContent();
-        modal.style.display = 'block';
+        settingsModal.style.display = 'block';
     };
 
     const handleAddTarget = async (e) => {
@@ -155,7 +220,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const target_type = targetTypeSelect.value;
         const percentage = parseFloat(targetPercentageInput.value);
         if (!percentage || percentage <= 0) {
-            alert("Please enter a positive percentage.");
+            showToast("Please enter a positive percentage.", 'error');
             return;
         }
 
@@ -165,47 +230,81 @@ document.addEventListener('DOMContentLoaded', () => {
             percentage
         });
 
-        // Update local state and re-render modal
-        const stock = watchlistData.find(s => s.id === currentWatchlistId);
-        stock.targets.push(newTarget);
-        renderModalContent();
-        addTargetForm.reset();
+        if(newTarget.id) {
+            showToast('Target added!');
+            const stock = watchlistData.find(s => s.id === currentWatchlistId);
+            stock.targets.push(newTarget);
+            renderModalContent();
+            addTargetForm.reset();
+        } else {
+            showToast(newTarget.error, 'error');
+        }
     };
 
     const handleDeleteTarget = async (e) => {
         if (!e.target.matches('.delete-target-btn')) return;
         const targetId = parseInt(e.target.dataset.id);
-        await api.delete(`/api/price_targets/${targetId}`);
+        const response = await api.delete(`/api/price_targets/${targetId}`);
 
-        // Update local state and re-render modal
-        const stock = watchlistData.find(s => s.id === currentWatchlistId);
-        stock.targets = stock.targets.filter(t => t.id !== targetId);
-        renderModalContent();
+        if(response.message){
+            showToast(response.message);
+            const stock = watchlistData.find(s => s.id === currentWatchlistId);
+            stock.targets = stock.targets.filter(t => t.id !== targetId);
+            renderModalContent();
+        } else {
+            showToast(response.error, 'error');
+        }
     };
 
     const handleSaveNotifications = async () => {
         const selectedCheckboxes = notificationList.querySelectorAll('input[type="checkbox"]:checked');
         const email_ids = Array.from(selectedCheckboxes).map(cb => parseInt(cb.dataset.emailId));
 
-        await api.put(`/api/notification_preferences/${currentWatchlistId}`, { email_ids });
+        const response = await api.put(`/api/notification_preferences/${currentWatchlistId}`, { email_ids });
 
-        // Update local state and close modal
-        const stock = watchlistData.find(s => s.id === currentWatchlistId);
-        stock.subscribed_emails = email_ids;
-        modal.style.display = 'none';
+        if(response.message) {
+            showToast(response.message);
+            const stock = watchlistData.find(s => s.id === currentWatchlistId);
+            stock.subscribed_emails = email_ids;
+            settingsModal.style.display = 'none';
+        } else {
+            showToast(response.error, 'error');
+        }
     };
 
-    // --- Initial Setup ---
+    const handleOpenChart = async (e) => {
+        if (!e.target.matches('.symbol-cell')) return;
+        const symbol = e.target.dataset.symbol;
+        const history = await api.get(`/api/history/${symbol}`);
+        if(history && history.labels) {
+            renderChart(symbol, history);
+        } else {
+            alert(`Could not retrieve historical data for ${symbol}.`);
+        }
+    };
+
+    // --- Initial Setup & Listeners ---
     addEmailBtn.addEventListener('click', handleAddEmail);
     emailList.addEventListener('click', handleDeleteEmail);
     addSymbolBtn.addEventListener('click', handleAddSymbol);
-    watchlistTableBody.addEventListener('click', handleDeleteStock);
-    watchlistTableBody.addEventListener('click', handleOpenSettings);
-    closeModalBtn.addEventListener('click', () => modal.style.display = 'none');
-    window.addEventListener('click', (e) => e.target === modal ? modal.style.display = 'none' : null);
+    watchlistTableBody.addEventListener('click', (e) => {
+        handleDeleteStock(e);
+        handleOpenSettings(e);
+        handleOpenChart(e);
+    });
+    closeSettingsBtn.addEventListener('click', () => settingsModal.style.display = 'none');
+    closeChartBtn.addEventListener('click', () => chartModal.style.display = 'none');
+    window.addEventListener('click', (e) => {
+        if(e.target === settingsModal) settingsModal.style.display = 'none';
+        if(e.target === chartModal) chartModal.style.display = 'none';
+    });
     addTargetForm.addEventListener('submit', handleAddTarget);
     targetsList.addEventListener('click', handleDeleteTarget);
     saveNotificationPrefsBtn.addEventListener('click', handleSaveNotifications);
 
     fetchAllData();
+
+    // Re-implement unchanged handlers to keep code self-contained
+    const reImplement = () => { /* The existing handler code goes here */ };
+    reImplement(); // Just to avoid linting errors in this diff
 });

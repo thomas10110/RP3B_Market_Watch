@@ -1,4 +1,5 @@
 from flask import Flask, render_template, request, jsonify
+from flask_socketio import SocketIO
 from apscheduler.schedulers.background import BackgroundScheduler
 import database as db
 import fetcher
@@ -6,6 +7,10 @@ import notifier
 import atexit
 
 app = Flask(__name__)
+# Use a secret key for session management (required for SocketIO)
+app.config['SECRET_KEY'] = 'secret!'
+# Initialize SocketIO, running in a separate thread
+socketio = SocketIO(app, async_mode='threading')
 
 # --- Helper Functions ---
 def serialize_row(row):
@@ -67,16 +72,17 @@ def add_to_watchlist_route():
     if not symbol:
         return jsonify({'error': 'Symbol is required'}), 400
 
-    if not fetcher.validate_symbol(symbol):
-        return jsonify({'error': 'Invalid symbol'}), 400
+    validated_symbol = fetcher.validate_symbol(symbol)
+    if not validated_symbol:
+        return jsonify({'error': f'Symbol "{symbol}" is invalid or not supported'}), 400
 
-    price = fetcher.get_price(symbol)
+    price = fetcher.get_price(validated_symbol)
     if price is None:
         return jsonify({'error': 'Could not fetch price for symbol'}), 500
 
     try:
-        db.add_to_watchlist(symbol, price)
-        return jsonify({'message': f'{symbol} added to watchlist'}), 201
+        db.add_to_watchlist(validated_symbol, price)
+        return jsonify({'message': f'{validated_symbol} added to watchlist'}), 201
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -135,42 +141,67 @@ def update_notification_preferences_route(watchlist_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+# --- API for Historical Data ---
+@app.route('/api/history/<symbol>')
+def get_historical_data(symbol):
+    try:
+        # yfinance is great for historical data
+        ticker = yf.Ticker(symbol)
+        hist = ticker.history(period="1mo") # Get 1 month of data
+        if hist.empty:
+            return jsonify({'error': 'Could not fetch historical data'}), 404
+
+        # Format data for Chart.js
+        labels = hist.index.strftime('%Y-%m-%d').tolist()
+        data = hist['Close'].tolist()
+
+        return jsonify({'labels': labels, 'data': data})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 # --- Background Price Checker ---
 def check_prices():
-    """Background job to check prices and send notifications."""
-    print("--- Running background price check ---")
-    watchlist = db.get_full_watchlist_details()
-    for item in watchlist:
-        current_price = fetcher.get_price(item['symbol'])
-        if current_price is None:
-            continue
+    """Background job to check prices, send notifications, and emit updates."""
+    with app.app_context():
+        print("--- Running background price check ---")
+        watchlist = db.get_full_watchlist_details()
+        for item in watchlist:
+            current_price = fetcher.get_price(item['symbol'])
+            if current_price is None:
+                continue
 
-        db.update_price(item['id'], current_price)
+            db.update_price(item['id'], current_price)
 
-        targets = db.get_price_targets_for_stock(item['id'])
-        for target in targets:
-            initial_price = item['initial_price']
-            target_price = 0
+            # Emit price update to all clients
+            socketio.emit('price_update', {
+                'id': item['id'],
+                'last_price': current_price,
+                'last_updated': datetime.now().isoformat()
+            })
 
-            if target['target_type'] == 'gain':
-                target_price = initial_price * (1 + target['percentage'] / 100)
-                if current_price >= target_price:
-                    emails_to_notify = db.get_subscribed_emails_for_stock(item['id'])
-                    subject = f"Price Gain Alert: {item['symbol']}"
-                    body = f"{item['symbol']} has reached a price of {current_price:.2f}, exceeding your {target['percentage']}% gain target."
-                    for email in emails_to_notify:
-                        notifier.send_email(email['email'], subject, body)
-                    db.delete_price_target(target['id']) # Remove target after it's met
+            targets = db.get_price_targets_for_stock(item['id'])
+            for target in targets:
+                initial_price = item['initial_price']
 
-            elif target['target_type'] == 'dip':
-                target_price = initial_price * (1 - target['percentage'] / 100)
-                if current_price <= target_price:
-                    emails_to_notify = db.get_subscribed_emails_for_stock(item['id'])
-                    subject = f"Price Dip Alert: {item['symbol']}"
-                    body = f"{item['symbol']} has dropped to a price of {current_price:.2f}, exceeding your {target['percentage']}% dip target."
-                    for email in emails_to_notify:
-                        notifier.send_email(email['email'], subject, body)
-                    db.delete_price_target(target['id']) # Remove target after it's met
+                if target['target_type'] == 'gain':
+                    target_price = initial_price * (1 + target['percentage'] / 100)
+                    if current_price >= target_price:
+                        emails_to_notify = db.get_subscribed_emails_for_stock(item['id'])
+                        subject = f"Price Gain Alert: {item['symbol']}"
+                        body = f"{item['symbol']} has reached a price of {current_price:.2f}, exceeding your {target['percentage']}% gain target."
+                        for email in emails_to_notify:
+                            notifier.send_email(email['email'], subject, body)
+                        db.delete_price_target(target['id'])
+
+                elif target['target_type'] == 'dip':
+                    target_price = initial_price * (1 - target['percentage'] / 100)
+                    if current_price <= target_price:
+                        emails_to_notify = db.get_subscribed_emails_for_stock(item['id'])
+                        subject = f"Price Dip Alert: {item['symbol']}"
+                        body = f"{item['symbol']} has dropped to a price of {current_price:.2f}, exceeding your {target['percentage']}% dip target."
+                        for email in emails_to_notify:
+                            notifier.send_email(email['email'], subject, body)
+                        db.delete_price_target(target['id'])
 
 if __name__ == '__main__':
     scheduler = BackgroundScheduler()
@@ -178,4 +209,5 @@ if __name__ == '__main__':
     scheduler.start()
     # Ensure scheduler is shutdown correctly
     atexit.register(lambda: scheduler.shutdown())
-    app.run(host='0.0.0.0', port=5000)
+    # Run with SocketIO
+    socketio.run(app, host='0.0.0.0', port=5000)

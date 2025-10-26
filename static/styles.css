@@ -203,6 +203,9 @@ tbody tr:hover {
     background: none;
     padding: 5px 0;
 }
+.chart-modal-content {
+    max-width: 800px;
+}
 
 /* Custom Scrollbar */
 ::-webkit-scrollbar { width: 8px; }
@@ -213,4 +216,31 @@ tbody tr:hover {
 }
 ::-webkit-scrollbar-thumb:hover {
     background: var(--secondary-glow);
+}
+
+/* Toast Notifications */
+#toast-container {
+    position: fixed;
+    bottom: 2rem;
+    right: 2rem;
+    z-index: 200;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+}
+.toast {
+    background: var(--card-bg);
+    border: 1px solid var(--primary-glow);
+    padding: 1rem 1.5rem;
+    border-radius: 8px;
+    margin-top: 10px;
+    box-shadow: 0 0 20px var(--primary-glow);
+    animation: fadeInOut 3s ease-in-out forwards;
+}
+.toast.success { border-left: 5px solid var(--primary-glow); }
+.toast.error { border-left: 5px solid var(--danger-color); }
+
+@keyframes fadeInOut {
+    0%, 100% { opacity: 0; transform: translateY(20px); }
+    10%, 90% { opacity: 1; transform: translateY(0); }
 }
