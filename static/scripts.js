@@ -37,12 +37,14 @@ document.addEventListener('DOMContentLoaded', () => {
         watchlistTableBody.innerHTML = '';
         watchlist.forEach(item => {
             const row = document.createElement('tr');
+            const gainTarget = item.gain_target !== null ? item.gain_target : '';
+            const dipTarget = item.dip_target !== null ? item.dip_target : '';
             row.innerHTML = `
                 <td>${item.symbol}</td>
                 <td>${item.last_price}</td>
                 <td>${item.last_updated}</td>
-                <td><input type="number" class="gain-target" data-id="${item.id}" placeholder="e.g., 5"></td>
-                <td><input type="number" class="dip-target" data-id="${item.id}" placeholder="e.g., 5"></td>
+                <td><input type="number" class="gain-target" data-id="${item.id}" placeholder="e.g., 5" value="${gainTarget}"></td>
+                <td><input type="number" class="dip-target" data-id="${item.id}" placeholder="e.g., 5" value="${dipTarget}"></td>
                 <td><button class="save-target-btn" data-id="${item.id}">Save</button>
                 <button class="delete-symbol-btn" data-symbol="${item.symbol}">Delete</button></td>
             `;

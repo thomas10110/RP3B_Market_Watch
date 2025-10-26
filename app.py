@@ -130,4 +130,5 @@ if __name__ == '__main__':
     scheduler = BackgroundScheduler()
     scheduler.add_job(func=check_prices, trigger="interval", seconds=300)
     scheduler.start()
-    app.run(debug=True, host='0.0.0.0')
+    # Running without debug mode to prevent import issues with the reloader.
+    app.run(debug=False, host='0.0.0.0')

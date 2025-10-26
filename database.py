@@ -86,9 +86,25 @@ def remove_from_watchlist(symbol):
     conn.close()
 
 def get_watchlist():
-    """Retrieves all items from the watchlist."""
+    """Retrieves all items from the watchlist with their price targets."""
     conn = get_db_connection()
-    watchlist = conn.execute('SELECT * FROM watchlist').fetchall()
+    query = """
+        SELECT
+            w.id,
+            w.symbol,
+            w.initial_price,
+            w.last_price,
+            w.last_updated,
+            pt.gain_target,
+            pt.dip_target
+        FROM
+            watchlist w
+        LEFT JOIN
+            price_targets pt ON w.id = pt.watchlist_id
+        ORDER BY
+            w.id
+    """
+    watchlist = conn.execute(query).fetchall()
     conn.close()
     return watchlist
 
@@ -101,10 +117,21 @@ def update_price(symbol, last_price):
     conn.close()
 
 def add_price_target(watchlist_id, gain_target, dip_target):
-    """Adds a price target for a watchlist item."""
+    """Adds or updates a price target for a watchlist item."""
     conn = get_db_connection()
     c = conn.cursor()
-    c.execute('INSERT INTO price_targets (watchlist_id, gain_target, dip_target) VALUES (?, ?, ?)', (watchlist_id, gain_target, dip_target))
+    c.execute("SELECT id FROM price_targets WHERE watchlist_id = ?", (watchlist_id,))
+    existing_target = c.fetchone()
+    if existing_target:
+        c.execute(
+            "UPDATE price_targets SET gain_target = ?, dip_target = ? WHERE watchlist_id = ?",
+            (gain_target, dip_target, watchlist_id)
+        )
+    else:
+        c.execute(
+            "INSERT INTO price_targets (watchlist_id, gain_target, dip_target) VALUES (?, ?, ?)",
+            (watchlist_id, gain_target, dip_target)
+        )
     conn.commit()
     conn.close()
 
