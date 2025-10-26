@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Market Watch</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <div class="container">
+        <h1>Market Watch</h1>
+
+        <div class="section">
+            <h2>Manage Emails</h2>
+            <div class="form-group">
+                <input type="email" id="email-input" placeholder="Enter email">
+                <button id="add-email-btn">Add Email</button>
+            </div>
+            <ul id="email-list"></ul>
+        </div>
+
+        <div class="section">
+            <h2>Watchlist</h2>
+            <div class="form-group">
+                <input type="text" id="symbol-input" placeholder="Enter symbol (e.g., AAPL)">
+                <button id="add-symbol-btn">Add Symbol</button>
+            </div>
+            <table id="watchlist-table">
+                <thead>
+                    <tr>
+                        <th>Symbol</th>
+                        <th>Last Price</th>
+                        <th>Last Updated</th>
+                        <th>Gain %</th>
+                        <th>Dip %</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='scripts.js') }}"></script>
+</body>
+</html>
