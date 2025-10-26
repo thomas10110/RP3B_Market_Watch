@@ -5,7 +5,7 @@ DATABASE_PATH = 'market_watch.db'
 
 def get_db_connection():
     """Establishes a connection to the database."""
-    conn = sqlite3.connect(DATABASE_PATH)
+    conn = sqlite3.connect(DATABASE_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -14,6 +14,7 @@ def create_tables():
     conn = get_db_connection()
     c = conn.cursor()
 
+    # Emails table remains the same
     c.execute('''
         CREATE TABLE IF NOT EXISTS emails (
             id INTEGER PRIMARY KEY,
@@ -21,6 +22,7 @@ def create_tables():
         )
     ''')
 
+    # Watchlist table remains the same
     c.execute('''
         CREATE TABLE IF NOT EXISTS watchlist (
             id INTEGER PRIMARY KEY,
@@ -31,124 +33,166 @@ def create_tables():
         )
     ''')
 
+    # Redesigned price_targets table for multiple targets
     c.execute('''
         CREATE TABLE IF NOT EXISTS price_targets (
             id INTEGER PRIMARY KEY,
-            watchlist_id INTEGER,
-            gain_target REAL,
-            dip_target REAL,
-            FOREIGN KEY (watchlist_id) REFERENCES watchlist (id)
+            watchlist_id INTEGER NOT NULL,
+            target_type TEXT NOT NULL, -- 'gain' or 'dip'
+            percentage REAL NOT NULL,
+            FOREIGN KEY (watchlist_id) REFERENCES watchlist (id) ON DELETE CASCADE
+        )
+    ''')
+
+    # New table for many-to-many relationship between watchlist and emails
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS notification_preferences (
+            watchlist_id INTEGER NOT NULL,
+            email_id INTEGER NOT NULL,
+            PRIMARY KEY (watchlist_id, email_id),
+            FOREIGN KEY (watchlist_id) REFERENCES watchlist (id) ON DELETE CASCADE,
+            FOREIGN KEY (email_id) REFERENCES emails (id) ON DELETE CASCADE
         )
     ''')
 
     conn.commit()
     conn.close()
 
+# --- CRUD for Emails ---
 def add_email(email):
-    """Adds a new email to the database."""
     conn = get_db_connection()
-    c = conn.cursor()
-    c.execute('INSERT INTO emails (email) VALUES (?)', (email,))
-    conn.commit()
-    conn.close()
+    try:
+        conn.execute('INSERT INTO emails (email) VALUES (?)', (email,))
+        conn.commit()
+    finally:
+        conn.close()
 
-def delete_email(email):
-    """Deletes an email from the database."""
+def delete_email(email_id):
     conn = get_db_connection()
-    c = conn.cursor()
-    c.execute('DELETE FROM emails WHERE email = ?', (email,))
-    conn.commit()
-    conn.close()
+    try:
+        conn.execute('DELETE FROM emails WHERE id = ?', (email_id,))
+        conn.commit()
+    finally:
+        conn.close()
 
 def get_emails():
-    """Retrieves all emails from the database."""
     conn = get_db_connection()
-    c = conn.cursor()
-    c.execute('SELECT email FROM emails')
-    emails = [row['email'] for row in c.fetchall()]
-    conn.close()
-    return emails
+    try:
+        return conn.execute('SELECT id, email FROM emails ORDER BY email').fetchall()
+    finally:
+        conn.close()
 
-def add_to_watchlist(symbol, last_price):
-    """Adds a new symbol to the watchlist."""
+# --- CRUD for Watchlist ---
+def add_to_watchlist(symbol, price):
     conn = get_db_connection()
-    c = conn.cursor()
-    c.execute('INSERT INTO watchlist (symbol, initial_price, last_price, last_updated) VALUES (?, ?, ?, datetime("now"))', (symbol, last_price, last_price))
-    conn.commit()
-    conn.close()
+    try:
+        conn.execute(
+            'INSERT INTO watchlist (symbol, initial_price, last_price, last_updated) VALUES (?, ?, ?, datetime("now"))',
+            (symbol, price, price)
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
-def remove_from_watchlist(symbol):
-    """Removes a symbol from the watchlist."""
+def remove_from_watchlist(symbol_id):
     conn = get_db_connection()
-    c = conn.cursor()
-    c.execute('DELETE FROM watchlist WHERE symbol = ?', (symbol,))
-    conn.commit()
-    conn.close()
+    try:
+        conn.execute('DELETE FROM watchlist WHERE id = ?', (symbol_id,))
+        conn.commit()
+    finally:
+        conn.close()
 
 def get_watchlist():
-    """Retrieves all items from the watchlist with their price targets."""
     conn = get_db_connection()
-    query = """
-        SELECT
-            w.id,
-            w.symbol,
-            w.initial_price,
-            w.last_price,
-            w.last_updated,
-            pt.gain_target,
-            pt.dip_target
-        FROM
-            watchlist w
-        LEFT JOIN
-            price_targets pt ON w.id = pt.watchlist_id
-        ORDER BY
-            w.id
-    """
-    watchlist = conn.execute(query).fetchall()
-    conn.close()
-    return watchlist
+    try:
+        return conn.execute('SELECT id, symbol, initial_price, last_price, last_updated FROM watchlist ORDER BY symbol').fetchall()
+    finally:
+        conn.close()
 
-def update_price(symbol, last_price):
-    """Updates the last price of a symbol in the watchlist."""
+def update_price(symbol_id, last_price):
     conn = get_db_connection()
-    c = conn.cursor()
-    c.execute('UPDATE watchlist SET last_price = ?, last_updated = datetime("now") WHERE symbol = ?', (last_price, symbol))
-    conn.commit()
-    conn.close()
-
-def add_price_target(watchlist_id, gain_target, dip_target):
-    """Adds or updates a price target for a watchlist item."""
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute("SELECT id FROM price_targets WHERE watchlist_id = ?", (watchlist_id,))
-    existing_target = c.fetchone()
-    if existing_target:
-        c.execute(
-            "UPDATE price_targets SET gain_target = ?, dip_target = ? WHERE watchlist_id = ?",
-            (gain_target, dip_target, watchlist_id)
+    try:
+        conn.execute(
+            'UPDATE watchlist SET last_price = ?, last_updated = datetime("now") WHERE id = ?',
+            (last_price, symbol_id)
         )
-    else:
-        c.execute(
-            "INSERT INTO price_targets (watchlist_id, gain_target, dip_target) VALUES (?, ?, ?)",
-            (watchlist_id, gain_target, dip_target)
+        conn.commit()
+    finally:
+        conn.close()
+
+# --- CRUD for Price Targets ---
+def add_price_target(watchlist_id, target_type, percentage):
+    conn = get_db_connection()
+    try:
+        conn.execute(
+            'INSERT INTO price_targets (watchlist_id, target_type, percentage) VALUES (?, ?, ?)',
+            (watchlist_id, target_type, percentage)
         )
-    conn.commit()
-    conn.close()
+        conn.commit()
+        # Return the newly created target
+        return conn.execute('SELECT * FROM price_targets WHERE id = last_insert_rowid()').fetchone()
+    finally:
+        conn.close()
 
-def get_price_targets(watchlist_id):
-    """Retrieves all price targets for a watchlist item."""
+def delete_price_target(target_id):
     conn = get_db_connection()
-    targets = conn.execute('SELECT * FROM price_targets WHERE watchlist_id = ?', (watchlist_id,)).fetchall()
-    conn.close()
-    return targets
+    try:
+        conn.execute('DELETE FROM price_targets WHERE id = ?', (target_id,))
+        conn.commit()
+    finally:
+        conn.close()
 
-def get_all_price_targets():
-    """Retrieves all price targets."""
+def get_price_targets_for_stock(watchlist_id):
     conn = get_db_connection()
-    targets = conn.execute('SELECT w.symbol, pt.gain_target, pt.dip_target FROM watchlist w JOIN price_targets pt ON w.id = pt.watchlist_id').fetchall()
-    conn.close()
-    return targets
+    try:
+        return conn.execute('SELECT id, target_type, percentage FROM price_targets WHERE watchlist_id = ?', (watchlist_id,)).fetchall()
+    finally:
+        conn.close()
 
-# Initialize the database and tables when the module is first imported
-if not os.path.exists(DATABASE_PATH):
-    create_tables()
+# --- CRUD for Notification Preferences ---
+def update_notification_preferences(watchlist_id, email_ids):
+    conn = get_db_connection()
+    try:
+        # Start a transaction
+        with conn:
+            # Delete old preferences for this stock
+            conn.execute('DELETE FROM notification_preferences WHERE watchlist_id = ?', (watchlist_id,))
+            # Insert new ones
+            if email_ids:
+                for email_id in email_ids:
+                    conn.execute(
+                        'INSERT INTO notification_preferences (watchlist_id, email_id) VALUES (?, ?)',
+                        (watchlist_id, email_id)
+                    )
+    finally:
+        conn.close()
+
+def get_subscribed_email_ids_for_stock(watchlist_id):
+    conn = get_db_connection()
+    try:
+        rows = conn.execute('SELECT email_id FROM notification_preferences WHERE watchlist_id = ?', (watchlist_id,)).fetchall()
+        return [row['email_id'] for row in rows]
+    finally:
+        conn.close()
+
+def get_subscribed_emails_for_stock(watchlist_id):
+    conn = get_db_connection()
+    try:
+        return conn.execute("""
+            SELECT e.email FROM emails e
+            JOIN notification_preferences np ON e.id = np.email_id
+            WHERE np.watchlist_id = ?
+        """, (watchlist_id,)).fetchall()
+    finally:
+        conn.close()
+
+# --- Complex Queries for Notification Worker ---
+def get_full_watchlist_details():
+    conn = get_db_connection()
+    try:
+        return conn.execute('SELECT id, symbol, initial_price FROM watchlist').fetchall()
+    finally:
+        conn.close()
+
+# Initialize the database and tables
+create_tables()

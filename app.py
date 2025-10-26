@@ -3,132 +3,179 @@ from apscheduler.schedulers.background import BackgroundScheduler
 import database as db
 import fetcher
 import notifier
+import atexit
 
 app = Flask(__name__)
 
+# --- Helper Functions ---
+def serialize_row(row):
+    """Converts a sqlite3.Row object to a dictionary."""
+    return dict(row) if row else None
+
+# --- Main Route ---
 @app.route('/')
 def index():
     """Renders the main page of the application."""
     return render_template('index.html')
 
+# --- API for Emails ---
 @app.route('/api/emails', methods=['GET'])
-def get_emails():
-    """API endpoint to get all emails."""
+def get_emails_route():
     emails = db.get_emails()
-    return jsonify(emails)
+    return jsonify([serialize_row(e) for e in emails])
 
 @app.route('/api/emails', methods=['POST'])
-def add_email():
-    """API endpoint to add a new email."""
+def add_email_route():
     data = request.get_json()
-    email = data.get('email')
-    if email:
-        try:
-            db.add_email(email)
-            return jsonify({'message': 'Email added successfully'}), 201
-        except Exception as e:
-            return jsonify({'error': str(e)}), 500
-    return jsonify({'error': 'Email is required'}), 400
+    if not data or not data.get('email'):
+        return jsonify({'error': 'Email is required'}), 400
+    try:
+        db.add_email(data['email'])
+        return jsonify({'message': 'Email added successfully'}), 201
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
-@app.route('/api/emails', methods=['DELETE'])
-def delete_email():
-    """API endpoint to delete an email."""
-    data = request.get_json()
-    email = data.get('email')
-    if email:
-        try:
-            db.delete_email(email)
-            return jsonify({'message': 'Email deleted successfully'}), 200
-        except Exception as e:
-            return jsonify({'error': str(e)}), 500
-    return jsonify({'error': 'Email is required'}), 400
+@app.route('/api/emails/<int:email_id>', methods=['DELETE'])
+def delete_email_route(email_id):
+    try:
+        db.delete_email(email_id)
+        return jsonify({'message': 'Email deleted successfully'}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
+# --- API for Watchlist ---
 @app.route('/api/watchlist', methods=['GET'])
-def get_watchlist():
-    """API endpoint to get the watchlist."""
-    watchlist = db.get_watchlist()
-    return jsonify([dict(row) for row in watchlist])
+def get_watchlist_route():
+    try:
+        watchlist_items = db.get_watchlist()
+
+        response_data = []
+        for item in watchlist_items:
+            item_dict = serialize_row(item)
+            item_dict['targets'] = [serialize_row(t) for t in db.get_price_targets_for_stock(item['id'])]
+            item_dict['subscribed_emails'] = [email_id for email_id in db.get_subscribed_email_ids_for_stock(item['id'])]
+            response_data.append(item_dict)
+
+        return jsonify(response_data)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/watchlist', methods=['POST'])
-def add_to_watchlist():
-    """API endpoint to add a symbol to the watchlist."""
+def add_to_watchlist_route():
     data = request.get_json()
     symbol = data.get('symbol')
-    if symbol:
-        if fetcher.validate_symbol(symbol):
-            current_price = fetcher.get_price(symbol)
-            if current_price is not None:
-                try:
-                    db.add_to_watchlist(symbol, current_price)
-                    return jsonify({'message': f'{symbol} added to watchlist'}), 201
-                except Exception as e:
-                    return jsonify({'error': str(e)}), 500
-            else:
-                return jsonify({'error': 'Could not fetch price'}), 500
-        else:
-            return jsonify({'error': 'Invalid symbol'}), 400
-    return jsonify({'error': 'Symbol is required'}), 400
+    if not symbol:
+        return jsonify({'error': 'Symbol is required'}), 400
 
-@app.route('/api/watchlist', methods=['DELETE'])
-def remove_from_watchlist():
-    """API endpoint to remove a symbol from the watchlist."""
-    data = request.get_json()
-    symbol = data.get('symbol')
-    if symbol:
-        try:
-            db.remove_from_watchlist(symbol)
-            return jsonify({'message': f'{symbol} removed from watchlist'}), 200
-        except Exception as e:
-            return jsonify({'error': str(e)}), 500
-    return jsonify({'error': 'Symbol is required'}), 400
+    if not fetcher.validate_symbol(symbol):
+        return jsonify({'error': 'Invalid symbol'}), 400
 
+    price = fetcher.get_price(symbol)
+    if price is None:
+        return jsonify({'error': 'Could not fetch price for symbol'}), 500
+
+    try:
+        db.add_to_watchlist(symbol, price)
+        return jsonify({'message': f'{symbol} added to watchlist'}), 201
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/watchlist/<int:symbol_id>', methods=['DELETE'])
+def remove_from_watchlist_route(symbol_id):
+    try:
+        db.remove_from_watchlist(symbol_id)
+        return jsonify({'message': 'Symbol removed from watchlist'}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# --- API for Price Targets ---
 @app.route('/api/price_targets', methods=['POST'])
-def add_price_target():
-    """API endpoint to add a price target."""
+def add_price_target_route():
     data = request.get_json()
     watchlist_id = data.get('watchlist_id')
-    gain_target = data.get('gain_target')
-    dip_target = data.get('dip_target')
-    if watchlist_id and gain_target and dip_target:
-        try:
-            db.add_price_target(watchlist_id, gain_target, dip_target)
-            return jsonify({'message': 'Price target added successfully'}), 201
-        except Exception as e:
-            return jsonify({'error': str(e)}), 500
-    return jsonify({'error': 'All fields are required'}), 400
+    target_type = data.get('target_type')
+    percentage = data.get('percentage')
 
-def check_prices():
-    """Checks prices and sends notifications if targets are met."""
+    if not all([watchlist_id, target_type, percentage]):
+        return jsonify({'error': 'Missing required fields'}), 400
+
     try:
-        watchlist = db.get_watchlist()
-        emails = db.get_emails()
-
-        for item in watchlist:
-            current_price = fetcher.get_price(item['symbol'])
-            if current_price is not None:
-                db.update_price(item['symbol'], current_price)
-                targets = db.get_price_targets(item['id'])
-                for target in targets:
-                    gain_target_price = item['initial_price'] * (1 + target['gain_target'] / 100)
-                    dip_target_price = item['initial_price'] * (1 - target['dip_target'] / 100)
-
-                    if current_price >= gain_target_price:
-                        subject = f"Price Alert: {item['symbol']} has reached a new high!"
-                        body = f"{item['symbol']} is now at {current_price}, which is above your target of {gain_target_price}."
-                        for email in emails:
-                            notifier.send_email(email, subject, body)
-
-                    if current_price <= dip_target_price:
-                        subject = f"Price Alert: {item['symbol']} has dropped!"
-                        body = f"{item['symbol']} is now at {current_price}, which is below your target of {dip_target_price}."
-                        for email in emails:
-                            notifier.send_email(email, subject, body)
+        new_target = db.add_price_target(watchlist_id, target_type, percentage)
+        return jsonify(serialize_row(new_target)), 201
     except Exception as e:
-        notifier.send_admin_notification("Error in check_prices", str(e))
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/price_targets/<int:target_id>', methods=['DELETE'])
+def delete_price_target_route(target_id):
+    try:
+        db.delete_price_target(target_id)
+        return jsonify({'message': 'Price target deleted successfully'}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# --- API for Notification Preferences ---
+@app.route('/api/notification_preferences/<int:watchlist_id>', methods=['GET'])
+def get_notification_preferences_route(watchlist_id):
+    try:
+        email_ids = db.get_subscribed_email_ids_for_stock(watchlist_id)
+        return jsonify(email_ids)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/notification_preferences/<int:watchlist_id>', methods=['PUT'])
+def update_notification_preferences_route(watchlist_id):
+    data = request.get_json()
+    email_ids = data.get('email_ids')
+    if email_ids is None:
+        return jsonify({'error': 'Missing email_ids list'}), 400
+
+    try:
+        db.update_notification_preferences(watchlist_id, email_ids)
+        return jsonify({'message': 'Preferences updated successfully'}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# --- Background Price Checker ---
+def check_prices():
+    """Background job to check prices and send notifications."""
+    print("--- Running background price check ---")
+    watchlist = db.get_full_watchlist_details()
+    for item in watchlist:
+        current_price = fetcher.get_price(item['symbol'])
+        if current_price is None:
+            continue
+
+        db.update_price(item['id'], current_price)
+
+        targets = db.get_price_targets_for_stock(item['id'])
+        for target in targets:
+            initial_price = item['initial_price']
+            target_price = 0
+
+            if target['target_type'] == 'gain':
+                target_price = initial_price * (1 + target['percentage'] / 100)
+                if current_price >= target_price:
+                    emails_to_notify = db.get_subscribed_emails_for_stock(item['id'])
+                    subject = f"Price Gain Alert: {item['symbol']}"
+                    body = f"{item['symbol']} has reached a price of {current_price:.2f}, exceeding your {target['percentage']}% gain target."
+                    for email in emails_to_notify:
+                        notifier.send_email(email['email'], subject, body)
+                    db.delete_price_target(target['id']) # Remove target after it's met
+
+            elif target['target_type'] == 'dip':
+                target_price = initial_price * (1 - target['percentage'] / 100)
+                if current_price <= target_price:
+                    emails_to_notify = db.get_subscribed_emails_for_stock(item['id'])
+                    subject = f"Price Dip Alert: {item['symbol']}"
+                    body = f"{item['symbol']} has dropped to a price of {current_price:.2f}, exceeding your {target['percentage']}% dip target."
+                    for email in emails_to_notify:
+                        notifier.send_email(email['email'], subject, body)
+                    db.delete_price_target(target['id']) # Remove target after it's met
 
 if __name__ == '__main__':
     scheduler = BackgroundScheduler()
     scheduler.add_job(func=check_prices, trigger="interval", seconds=300)
     scheduler.start()
-    # Running without debug mode to prevent import issues with the reloader.
-    app.run(debug=False, host='0.0.0.0')
+    # Ensure scheduler is shutdown correctly
+    atexit.register(lambda: scheduler.shutdown())
+    app.run(host='0.0.0.0', port=5000)

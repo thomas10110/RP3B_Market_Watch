@@ -3,42 +3,78 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Market Watch</title>
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap" rel="stylesheet">
+    <title>RP3B Market Watch</title>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 </head>
 <body>
     <div class="container">
-        <h1>Market Watch</h1>
+        <header class="main-header">
+            <h1>MARKET WATCH</h1>
+        </header>
 
-        <div class="section">
-            <h2>Manage Emails</h2>
-            <div class="form-group">
-                <input type="email" id="email-input" placeholder="Enter email">
-                <button id="add-email-btn">Add Email</button>
-            </div>
-            <ul id="email-list"></ul>
-        </div>
+        <main>
+            <section class="grid-container">
+                <div class="card" id="email-management">
+                    <h2>Email Subscribers</h2>
+                    <div class="form-group">
+                        <input type="email" id="email-input" placeholder="Add new email...">
+                        <button id="add-email-btn">Add</button>
+                    </div>
+                    <ul id="email-list"></ul>
+                </div>
 
-        <div class="section">
-            <h2>Watchlist</h2>
-            <div class="form-group">
-                <input type="text" id="symbol-input" placeholder="Enter symbol (e.g., AAPL)">
-                <button id="add-symbol-btn">Add Symbol</button>
+                <div class="card" id="watchlist-management">
+                    <h2>Watchlist</h2>
+                    <div class="form-group">
+                        <input type="text" id="symbol-input" placeholder="Add new symbol (e.g., AAPL)...">
+                        <button id="add-symbol-btn">Add</button>
+                    </div>
+                    <div class="table-container">
+                        <table id="watchlist-table">
+                            <thead>
+                                <tr>
+                                    <th>Symbol</th>
+                                    <th>Initial Price</th>
+                                    <th>Last Price</th>
+                                    <th>Last Updated</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="modal">
+        <div class="modal-content">
+            <header class="modal-header">
+                <h2 id="modal-title">Settings</h2>
+                <span class="close-btn">&times;</span>
+            </header>
+            <div class="modal-body">
+                <div class="modal-section">
+                    <h3>Price Targets</h3>
+                    <form id="add-target-form" class="form-group">
+                        <select id="target-type">
+                            <option value="gain">Gain</option>
+                            <option value="dip">Dip</option>
+                        </select>
+                        <input type="number" id="target-percentage" placeholder="Percentage %" min="0.1" step="0.1" required>
+                        <button type="submit">Add Target</button>
+                    </form>
+                    <ul id="targets-list"></ul>
+                </div>
+                <div class="modal-section">
+                    <h3>Notification Emails</h3>
+                    <ul id="notification-list"></ul>
+                    <button id="save-notification-prefs">Save Preferences</button>
+                </div>
             </div>
-            <table id="watchlist-table">
-                <thead>
-                    <tr>
-                        <th>Symbol</th>
-                        <th>Last Price</th>
-                        <th>Last Updated</th>
-                        <th>Gain %</th>
-                        <th>Dip %</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody></tbody>
-            </table>
         </div>
     </div>
 
