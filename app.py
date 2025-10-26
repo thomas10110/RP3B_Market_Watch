@@ -109,8 +109,8 @@ def check_prices():
                 db.update_price(item['symbol'], current_price)
                 targets = db.get_price_targets(item['id'])
                 for target in targets:
-                gain_target_price = item['initial_price'] * (1 + target['gain_target'] / 100)
-                dip_target_price = item['initial_price'] * (1 - target['dip_target'] / 100)
+                    gain_target_price = item['initial_price'] * (1 + target['gain_target'] / 100)
+                    dip_target_price = item['initial_price'] * (1 - target['dip_target'] / 100)
 
                     if current_price >= gain_target_price:
                         subject = f"Price Alert: {item['symbol']} has reached a new high!"
